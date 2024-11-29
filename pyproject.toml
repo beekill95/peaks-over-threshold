@@ -1,0 +1,19 @@
+[project]
+name = "peaks-over-threshold"
+version = "0.1.0"
+description = "Finding extreme values in time series using peaks-over-threshold"
+authors = [
+    {name = "beekill", email = "nguyenmbquan95@gmail.com"},
+]
+dependencies = ["numpy>=2.0.2", "numba>=0.60.0", "scipy>=1.14.1"]
+requires-python = ">=3.10"
+readme = "README.md"
+license = {text = "MIT"}
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+
+[tool.pdm]
+distribution = true
