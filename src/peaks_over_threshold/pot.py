@@ -7,7 +7,7 @@ import numpy as np
 
 class SPOT:
     def __init__(self, q: float = 1e-3) -> None:
-        self.q = 1e-3
+        self.q = q
         self.calibrated = False
         self.t = 0
         self.zq = 0
@@ -77,7 +77,7 @@ class SPOT:
                 self.n += 1
 
                 if value > self.t:
-                    # Reestimatet EVD's parameters and update the zq.
+                    # Reestimate EVD's parameters and update the zq.
                     self.excesses = np.append(self.excesses, value - self.t)
 
                     gamma, sigma = _grimshaw(self.excesses)
