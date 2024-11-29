@@ -12,6 +12,7 @@ class SPOT:
         self.t = 0
         self.zq = 0
 
+        self.n = 0
         self.excesses = np.zeros(1, dtype=float)
 
     def fit(self, X: np.ndarray, init_quantile: float = 0.98):
@@ -78,6 +79,7 @@ class SPOT:
                 if value > self.t:
                     # Reestimatet EVD's parameters and update the zq.
                     self.excesses = np.append(self.excesses, value - self.t)
+
                     gamma, sigma = _grimshaw(self.excesses)
                     self.zq = _calculate_threshold(
                         q=self.q,
@@ -88,7 +90,8 @@ class SPOT:
                         t=self.t,
                     )
 
-            thresholds = self.zq
+            # Update the threshold.
+            thresholds[i] = self.zq
 
         return thresholds, extremes
 
