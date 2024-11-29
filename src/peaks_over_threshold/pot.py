@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
+from scipy.optimize import minimize
 
 
 class SPOT:
@@ -137,8 +138,51 @@ def _grimshaw(
     num_candidates: int = 10,
     epsilon: float = 1e-8,
 ) -> tuple[float, float]:
+    ymin, ymax, ymean = (
+        excesses.min(),
+        excesses.max(),
+        excesses.mean(),
+    )
+
+    # Calculate the bounds for root search.
+    a = -1 / ymax
+    b = 2 * (ymean - ymin) / (ymean * ymin)
+    c = 2 * (ymean - ymin) / (ymin * ymin)
+
+    # Instead of using root search, we perform a minimization problem.
+    candidates_1 = minimize(_obj, args=excesses, bounds=(a + epsilon, -epsilon))
+    candidates_2 = minimize(_obj, args=excesses, bounds=(b, c))
+    candidates = np.concatenate([candidates_1, candidates_2])
+
+    # Calculate gamma and sigma.
+    gamma = _v(excesses, candidates) - 1
+    sigma = gamma / candidates
+
+    # TODO: include gamma and sigma for candidate = 0.
+
+    # Calculate the log-likelihood and choose the best one.
+    best_idx = np.argmax(_log_likelihood(excesses, gamma=gamma, sigma=sigma))
+
+    return gamma[best_idx], sigma[best_idx]
+
+
+def _log_likelihood(excesses: np.ndarray, *, gamma: np.ndarray, sigma: np.ndarray):
     # TODO
     pass
+
+
+def _obj(x: np.ndarray, excesses: np.ndarray):
+    w = _u(excesses, x) * _v(excesses, x) - 1
+    return np.sum(w**2)
+
+
+def _u(excesses: np.ndarray, x: np.ndarray):
+    return np.mean(1.0 / (1.0 + x[None, ...] * excesses[..., None]), axis=-1)
+
+
+def _v(excesses: np.ndarray, x: np.ndarray):
+    # TODO: support numpy broadcasting.
+    return 1.0 + np.mean(np.log(1 + x[None, ...] * excesses[..., None]), axis=-1)
 
 
 def _calculate_threshold(
