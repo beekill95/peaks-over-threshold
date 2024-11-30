@@ -17,3 +17,14 @@ build-backend = "setuptools.build_meta"
 
 [tool.pdm]
 distribution = true
+
+[dependency-groups]
+dev = [
+    "ucimlrepo>=0.0.7",
+    "jupyterlab>=4.3.1",
+    "pandas>=2.2.3",
+    "jupytext>=1.16.4",
+    "matplotlib>=3.9.2",
+    "seaborn>=0.13.2",
+    "joblib>=1.4.2",
+]
