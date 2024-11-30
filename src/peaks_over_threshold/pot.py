@@ -98,6 +98,109 @@ class SPOT:
         return thresholds, extremes
 
 
+class DSPOT:
+    def __init__(self, depth: int, q: float = 1e-3) -> None:
+        self.q = q
+        self.calibrated = False
+        self.t = 0
+        self.zq = 0
+        self.depth = depth
+
+        self.n = 0
+        self.excesses = np.zeros(1, dtype=float)
+        self.window = np.zeros(1, dtype=float)
+        self.window_avg = 0
+
+    def fit(self, X: np.ndarray, init_quantile: float = 0.98):
+        depth = self.depth
+        assert X.size > depth, "Time series too short to calibrate the algorithm"
+
+        window_avg = np.mean(X[:depth])
+
+        remains = X[depth:]
+        diff = np.zeros_like(remains)
+
+        for i in range(remains.size):
+            diff[i] = remains[i] - window_avg
+
+            # Update the window avg.
+            window_avg += (X[i] - X[i - depth]) / depth
+
+        # Calculate the zq and t.
+        zq, t = pot(diff, self.q, init_quantile=init_quantile)
+        self.t = t
+        self.zq = zq
+        self.calibrated = True
+
+        self.excesses = diff[diff > t] - t
+        self.n = X.size
+
+        self.window = X[-depth:]
+        self.window_avg = window_avg
+
+        return self
+
+    def fit_predict(
+        self,
+        X: np.ndarray,
+        *,
+        num_inits: int | None = None,
+        init_quantile: float = 0.98,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        thresholds = np.zeros_like(X)
+        extremes = np.zeros_like(X, dtype=bool)
+
+        if not self.calibrated:
+            assert (
+                num_inits is not None
+            ), "Requiring number of elements for calibrating the algorithm."
+
+            # Calibrate the algorithm.
+            start_predict_idx = num_inits + self.depth
+            self.fit(X[:start_predict_idx], init_quantile=init_quantile)
+
+            # Set the initial thresholds.
+            thresholds[:start_predict_idx] = self.zq + self.window_avg
+
+        else:
+            start_predict_idx = 0
+
+        window_avg = self.window_avg
+        window = self.window
+
+        for i in range(start_predict_idx, X.size):
+            value = X[i] - window_avg
+
+            # Found an extreme value.
+            if value > self.zq:
+                extremes[i] = True
+            else:
+                # Update the window.
+                self.n += 1
+                thresholds[i] = self.zq + window_avg
+
+                # Reestimate EVD's parameters and update the zq.
+                if value > self.t:
+                    self.excesses = np.append(self.excesses, value - self.t)
+
+                    gamma, sigma = _grimshaw(self.excesses)
+                    self.zq = _calculate_threshold(
+                        q=self.q,
+                        gamma=gamma,
+                        sigma=sigma,
+                        n=self.n,
+                        Nt=self.excesses.size,
+                        t=self.t,
+                    )
+
+                # Update the window average.
+                window = np.append(window, X[i])
+                window_avg += (window[-1] - window[0]) / self.depth
+                window = window[1:]
+
+        return thresholds, extremes
+
+
 def pot(
     X: np.ndarray,
     q: float = 1e-3,
@@ -216,7 +319,7 @@ def _log_likelihood(excesses: np.ndarray, gamma: float, sigma: float, res: np.nd
 # )
 def _v(excesses: np.ndarray, x: np.ndarray):
     one_plus_prod = 1.0 + x[..., None] * excesses[None, ...]
-    return 1.0 + np.mean(np.log(one_plus_prod), axis=-1)
+    return 1.0 + np.mean(np.log(one_plus_prod + 1e-9), axis=-1)
 
 
 # @nb.njit(

@@ -1,3 +1,3 @@
-from .pot import pot, SPOT
+from .pot import pot, SPOT, DSPOT
 
-__all__ = ("pot", "SPOT")
+__all__ = ("pot", "SPOT", "DSPOT")

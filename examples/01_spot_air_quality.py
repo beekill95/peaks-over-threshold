@@ -22,7 +22,7 @@ import seaborn as sns
 
 from utils import fetch_ds
 
-from peaks_over_threshold import SPOT
+from peaks_over_threshold import SPOT, DSPOT
 
 sns.set_theme()
 
@@ -42,6 +42,16 @@ sns.lineplot(X, x=X.index, y="PT08.S3(NOx)")
 
 # %%
 spot = SPOT(1e-4)
+thresholds, alerts = spot.fit_predict(X["PT08.S3(NOx)"].to_numpy(), num_inits=1000)
+
+# %%
+fig, ax = plt.subplots(figsize=(12, 4))
+sns.lineplot(X, x=X.index, y="PT08.S3(NOx)")
+ax.plot(X.index, thresholds)
+ax.scatter(X.index[alerts], X["PT08.S3(NOx)"].loc[alerts], color="tomato", alpha=0.5)
+
+# %%
+spot = DSPOT(100, 1e-4)
 thresholds, alerts = spot.fit_predict(X["PT08.S3(NOx)"].to_numpy(), num_inits=1000)
 
 # %%
