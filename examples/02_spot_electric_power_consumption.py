@@ -61,5 +61,11 @@ X.info()
 sns.lineplot(X, x=X.index, y="Global_active_power")
 
 # %%
-spot = SPOT()
-spot.fit_predict(X["Global_active_power"].to_numpy(), num_inits=1000)
+spot = SPOT(1e-4)
+thresholds, alerts = spot.fit_predict(X["Global_active_power"].to_numpy(), num_inits=1000)
+
+# %%
+fig, ax = plt.subplots(figsize=(12, 4))
+sns.lineplot(X, x=X.index, y="Global_active_power")
+ax.plot(X.index, thresholds)
+ax.scatter(X.index[alerts], X["Global_active_power"].loc[alerts], color="tomato", alpha=0.5)

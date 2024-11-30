@@ -182,6 +182,11 @@ def _grimshaw(
     return gamma[best_idx], sigma[best_idx]
 
 
+@nb.njit([nb.bool(nb.float32), nb.bool(nb.float64)])
+def _is0(a: float) -> bool:
+    return abs(a) <= 1e-9
+
+
 @nb.guvectorize(
     [
         (nb.float32[:], nb.float32, nb.float32, nb.float32[:]),
@@ -191,13 +196,16 @@ def _grimshaw(
     nopython=True,
 )
 def _log_likelihood(excesses: np.ndarray, gamma: float, sigma: float, res: np.ndarray):
+    "Log likelihood of the Generalized Pareto Distribution."
     Nt = excesses.size
 
-    # TODO: what if sigma and gamma is zero or negative?
-    x = gamma / sigma
-    res[0] = -Nt * np.log(sigma) - (1.0 + 1.0 / gamma) * np.sum(
-        np.log(1.0 + x * excesses)
-    )
+    if _is0(gamma):
+        res[0] = -Nt * np.log(sigma) - np.sum(excesses) / sigma
+    else:
+        x = gamma / sigma
+        res[0] = -Nt * np.log(sigma) - (1.0 + 1.0 / gamma) * np.sum(
+            np.log(1.0 + x * excesses)
+        )
 
 
 # @nb.njit(
@@ -240,12 +248,7 @@ def _calculate_threshold(
 ) -> float:
     tau = q * n / Nt
 
-    if abs(gamma) <= 1e-9:
-        # TODO
+    if _is0(gamma):
         return t - sigma * log(tau)
     else:
         return t + (sigma / gamma) * (pow(tau, -gamma) - 1)
-
-
-def _is_close(a, b, /, rel_tol: float = 1e-9, abs_tol: float = 0):
-    pass

@@ -41,7 +41,7 @@ X.head()
 sns.lineplot(X, x=X.index, y="PT08.S3(NOx)")
 
 # %%
-spot = SPOT()
+spot = SPOT(1e-4)
 thresholds, alerts = spot.fit_predict(X["PT08.S3(NOx)"].to_numpy(), num_inits=1000)
 
 # %%
