@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import math
+from math import log
 
 import numpy as np
 import numba as nb
@@ -141,7 +141,7 @@ def _grimshaw(
 ) -> tuple[float, float]:
     def _solve_grimshaw(lower_bound: float, upper_bound: float) -> np.ndarray:
         x0 = np.linspace(lower_bound, upper_bound, num_candidates, endpoint=True)
-        return minimize(
+        results = minimize(
             _obj,
             x0,
             args=excesses,
@@ -149,6 +149,8 @@ def _grimshaw(
             bounds=[(lower_bound, upper_bound)] * num_candidates,
             jac=True,
         )
+
+        return results.x
 
     ymin, ymax, ymean = (
         excesses.min(),
@@ -175,13 +177,16 @@ def _grimshaw(
     sigma = np.append(sigma, ymean)  # TODO: why ymean?
 
     # Calculate the log-likelihood and choose the best one.
-    best_idx = np.argmax(_log_likelihood(excesses, gamma, sigma))
+    best_idx = np.nanargmax(_log_likelihood(excesses, gamma, sigma))
 
     return gamma[best_idx], sigma[best_idx]
 
 
 @nb.guvectorize(
-    [nb.float32[:], nb.float32, nb.float32, nb.float32[:]],
+    [
+        (nb.float32[:], nb.float32, nb.float32, nb.float32[:]),
+        (nb.float64[:], nb.float64, nb.float64, nb.float64[:]),
+    ],
     "(n),(),()->()",
     nopython=True,
 )
@@ -195,9 +200,25 @@ def _log_likelihood(excesses: np.ndarray, gamma: float, sigma: float, res: np.nd
     )
 
 
-@nb.njit(nb.float32[:](nb.float32[:], nb.float32[:]))
+# @nb.njit(
+#     [
+#         nb.float32[:](nb.float32[:], nb.float32[:]),
+#         nb.float64[:](nb.float64[:], nb.float64[:]),
+#     ]
+# )
+def _v(excesses: np.ndarray, x: np.ndarray):
+    one_plus_prod = 1.0 + x[..., None] * excesses[None, ...]
+    return 1.0 + np.mean(np.log(one_plus_prod), axis=-1)
+
+
+# @nb.njit(
+#     [
+#         nb.float32[:](nb.float32[:], nb.float32[:]),
+#         nb.float64[:](nb.float64[:], nb.float64[:]),
+#     ]
+# )
 def _obj(x: np.ndarray, excesses: np.ndarray):
-    one_plus_prod = 1.0 + x[None, ...] * excesses[..., None]
+    one_plus_prod = 1.0 + x[..., None] * excesses[None, ...]
 
     # Calculate the objective.
     u = np.mean(1.0 / one_plus_prod, axis=-1)
@@ -206,17 +227,11 @@ def _obj(x: np.ndarray, excesses: np.ndarray):
     obj = np.sum(w**2)
 
     # Calculate the objective derivative wrt to each x.
-    u_deriv = -np.mean(excesses[..., None] / one_plus_prod**2, axis=-1)
-    v_deriv = np.mean(excesses[..., None] / one_plus_prod, axis=-1)
+    u_deriv = -np.mean(excesses[None, ...] / one_plus_prod**2, axis=-1)
+    v_deriv = np.mean(excesses[None, ...] / one_plus_prod, axis=-1)
     obj_deriv = 2 * w * (u_deriv * v + u * v_deriv)
 
     return obj, obj_deriv
-
-
-@nb.njit(nb.float32[:](nb.float32[:], nb.float32[:]))
-def _v(excesses: np.ndarray, x: np.ndarray):
-    one_plus_prod = 1.0 + x[None, ...] * excesses[..., None]
-    return 1.0 + np.mean(np.log(one_plus_prod), axis=-1)
 
 
 @nb.njit()
@@ -225,8 +240,12 @@ def _calculate_threshold(
 ) -> float:
     tau = q * n / Nt
 
-    if math.isclose(gamma, 0):
+    if abs(gamma) <= 1e-9:
         # TODO
-        return t - sigma * math.log(tau)
+        return t - sigma * log(tau)
     else:
         return t + (sigma / gamma) * (pow(tau, -gamma) - 1)
+
+
+def _is_close(a, b, /, rel_tol: float = 1e-9, abs_tol: float = 0):
+    pass
