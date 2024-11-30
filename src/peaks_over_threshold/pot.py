@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
+import numba as nb
 from scipy.optimize import minimize
 
 
@@ -161,30 +162,51 @@ def _grimshaw(
     # TODO: include gamma and sigma for candidate = 0.
 
     # Calculate the log-likelihood and choose the best one.
-    best_idx = np.argmax(_log_likelihood(excesses, gamma=gamma, sigma=sigma))
+    best_idx = np.argmax(_log_likelihood(excesses, gamma, sigma))
 
     return gamma[best_idx], sigma[best_idx]
 
 
-def _log_likelihood(excesses: np.ndarray, *, gamma: np.ndarray, sigma: np.ndarray):
-    # TODO
+@nb.guvectorize(
+    [nb.float32[:], nb.float32, nb.float32, nb.float32[:]],
+    "(n),(),()->()",
+    nopython=True,
+)
+def _log_likelihood(excesses: np.ndarray, gamma: float, sigma: float, res: np.ndarray):
+    Nt = excesses.size
+
+    # TODO: what if sigma and gamma is zero or negative?
+    x = gamma / sigma
+    res[0] = -Nt * np.log(sigma) - (1.0 + 1.0 / gamma) * np.sum(
+        np.log(1.0 + x * excesses)
+    )
+
+
+@nb.njit()
+def _obj_deriv(x: np.ndarray, excesses: np.ndarray):
     pass
 
 
+@nb.njit()
 def _obj(x: np.ndarray, excesses: np.ndarray):
+    # TODO: calculate the derivative here to save some computations.
+
     w = _u(excesses, x) * _v(excesses, x) - 1
     return np.sum(w**2)
 
 
+@nb.njit()
 def _u(excesses: np.ndarray, x: np.ndarray):
     return np.mean(1.0 / (1.0 + x[None, ...] * excesses[..., None]), axis=-1)
 
 
+@nb.njit()
 def _v(excesses: np.ndarray, x: np.ndarray):
     # TODO: support numpy broadcasting.
     return 1.0 + np.mean(np.log(1 + x[None, ...] * excesses[..., None]), axis=-1)
 
 
+@nb.njit()
 def _calculate_threshold(
     *, q: float, gamma: float, sigma: float, n: int, Nt: int, t: float
 ) -> float:
