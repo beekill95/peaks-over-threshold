@@ -5,6 +5,7 @@ from math import log
 import numpy as np
 import numba as nb
 from scipy.optimize import minimize
+from tqdm.auto import tqdm
 
 
 class SPOT:
@@ -69,7 +70,7 @@ class SPOT:
             start_predict_idx = 0
 
         # Predict.
-        for i in range(start_predict_idx, X.size):
+        for i in tqdm(range(start_predict_idx, X.size)):
             value = X[i]
 
             # Found an extreme value.
@@ -245,7 +246,7 @@ def _grimshaw(
     def _solve_grimshaw(lower_bound: float, upper_bound: float) -> np.ndarray:
         x0 = np.linspace(lower_bound, upper_bound, num_candidates, endpoint=True)
         results = minimize(
-            _obj,
+            _obj2,
             x0,
             args=excesses,
             method="L-BFGS-B",
@@ -311,29 +312,17 @@ def _log_likelihood(excesses: np.ndarray, gamma: float, sigma: float, res: np.nd
         )
 
 
-# @nb.njit(
-#     [
-#         nb.float32[:](nb.float32[:], nb.float32[:]),
-#         nb.float64[:](nb.float64[:], nb.float64[:]),
-#     ]
-# )
 def _v(excesses: np.ndarray, x: np.ndarray):
     one_plus_prod = 1.0 + x[..., None] * excesses[None, ...]
-    return 1.0 + np.mean(np.log(one_plus_prod + 1e-9), axis=-1)
+    return 1.0 + np.nanmean(np.log(one_plus_prod), axis=-1)
 
 
-# @nb.njit(
-#     [
-#         nb.float32[:](nb.float32[:], nb.float32[:]),
-#         nb.float64[:](nb.float64[:], nb.float64[:]),
-#     ]
-# )
 def _obj(x: np.ndarray, excesses: np.ndarray):
     one_plus_prod = 1.0 + x[..., None] * excesses[None, ...]
 
     # Calculate the objective.
     u = np.mean(1.0 / one_plus_prod, axis=-1)
-    v = _v(excesses, x)
+    v = 1.0 + np.mean(np.log(one_plus_prod), axis=-1)
     w = u * v - 1
     obj = np.sum(w**2)
 
@@ -343,6 +332,36 @@ def _obj(x: np.ndarray, excesses: np.ndarray):
     obj_deriv = 2 * w * (u_deriv * v + u * v_deriv)
 
     return obj, obj_deriv
+
+
+@nb.njit(nogil=True)
+def _calc_one_plus(x: np.ndarray, excesses: np.ndarray):
+    return 1.0 + x[..., None] * excesses[None, ...]
+
+
+@nb.njit(parallel=True, nogil=True, cache=True)
+def _obj2(x: np.ndarray, excesses: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    one_plus_prod = _calc_one_plus(x, excesses)
+
+    Nt = excesses.size
+
+    u = np.zeros_like(x)
+    v = np.ones_like(x)
+    u_deriv = np.zeros_like(x)
+    v_deriv = np.zeros_like(x)
+
+    for i in nb.prange(Nt):
+        opp = one_plus_prod[:, i]
+        u += 1.0 / (opp * Nt)
+        v += np.log(opp) / Nt
+
+        temp = excesses[i] / (Nt * opp)
+        v_deriv += temp
+        u_deriv -= temp / opp
+
+    w = u * v - 1
+
+    return np.sum(w**2), 2 * w * (u_deriv * v + u * v_deriv)
 
 
 @nb.njit()
