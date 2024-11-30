@@ -139,6 +139,17 @@ def _grimshaw(
     num_candidates: int = 10,
     epsilon: float = 1e-8,
 ) -> tuple[float, float]:
+    def _solve_grimshaw(lower_bound: float, upper_bound: float) -> np.ndarray:
+        x0 = np.linspace(lower_bound, upper_bound, num_candidates, endpoint=True)
+        return minimize(
+            _obj,
+            x0,
+            args=excesses,
+            method="L-BFGS-B",
+            bounds=[(lower_bound, upper_bound)] * num_candidates,
+            jac=True,
+        )
+
     ymin, ymax, ymean = (
         excesses.min(),
         excesses.max(),
@@ -151,15 +162,17 @@ def _grimshaw(
     c = 2 * (ymean - ymin) / (ymin * ymin)
 
     # Instead of using root search, we perform a minimization problem.
-    candidates_1 = minimize(_obj, args=excesses, bounds=(a + epsilon, -epsilon))
-    candidates_2 = minimize(_obj, args=excesses, bounds=(b, c))
-    candidates = np.concatenate([candidates_1, candidates_2])
+    candidates_1 = _solve_grimshaw(a + epsilon, -epsilon)
+    candidates_2 = _solve_grimshaw(b, c)
+    candidates = np.unique(np.concatenate([candidates_1, candidates_2]))
 
     # Calculate gamma and sigma.
     gamma = _v(excesses, candidates) - 1
     sigma = gamma / candidates
 
-    # TODO: include gamma and sigma for candidate = 0.
+    # Include gamma and sigma for candidate = 0.
+    gamma = np.append(gamma, 0.0)
+    sigma = np.append(sigma, ymean)  # TODO: why ymean?
 
     # Calculate the log-likelihood and choose the best one.
     best_idx = np.argmax(_log_likelihood(excesses, gamma, sigma))
@@ -182,28 +195,28 @@ def _log_likelihood(excesses: np.ndarray, gamma: float, sigma: float, res: np.nd
     )
 
 
-@nb.njit()
-def _obj_deriv(x: np.ndarray, excesses: np.ndarray):
-    pass
-
-
-@nb.njit()
+@nb.njit(nb.float32[:](nb.float32[:], nb.float32[:]))
 def _obj(x: np.ndarray, excesses: np.ndarray):
-    # TODO: calculate the derivative here to save some computations.
+    one_plus_prod = 1.0 + x[None, ...] * excesses[..., None]
 
-    w = _u(excesses, x) * _v(excesses, x) - 1
-    return np.sum(w**2)
+    # Calculate the objective.
+    u = np.mean(1.0 / one_plus_prod, axis=-1)
+    v = _v(excesses, x)
+    w = u * v - 1
+    obj = np.sum(w**2)
+
+    # Calculate the objective derivative wrt to each x.
+    u_deriv = -np.mean(excesses[..., None] / one_plus_prod**2, axis=-1)
+    v_deriv = np.mean(excesses[..., None] / one_plus_prod, axis=-1)
+    obj_deriv = 2 * w * (u_deriv * v + u * v_deriv)
+
+    return obj, obj_deriv
 
 
-@nb.njit()
-def _u(excesses: np.ndarray, x: np.ndarray):
-    return np.mean(1.0 / (1.0 + x[None, ...] * excesses[..., None]), axis=-1)
-
-
-@nb.njit()
+@nb.njit(nb.float32[:](nb.float32[:], nb.float32[:]))
 def _v(excesses: np.ndarray, x: np.ndarray):
-    # TODO: support numpy broadcasting.
-    return 1.0 + np.mean(np.log(1 + x[None, ...] * excesses[..., None]), axis=-1)
+    one_plus_prod = 1.0 + x[None, ...] * excesses[..., None]
+    return 1.0 + np.mean(np.log(one_plus_prod), axis=-1)
 
 
 @nb.njit()
