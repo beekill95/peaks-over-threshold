@@ -17,12 +17,14 @@ class SPOT:
 
         self.n = 0
         self.excesses = np.zeros(1, dtype=float)
+        self._grimshaw = None
 
     def fit(self, X: np.ndarray, init_quantile: float = 0.98):
         """
         Calibrate the algorithm.
         """
-        zq, t = pot(X, self.q, init_quantile=init_quantile)
+        self._grimshaw = _Grimshaw()
+        zq, t = pot(X, self.q, init_quantile=init_quantile, _grimshaw=self._grimshaw)
         self.t = t
         self.zq = zq
         self.calibrated = True
@@ -83,7 +85,7 @@ class SPOT:
                     # Reestimate EVD's parameters and update the zq.
                     self.excesses = np.append(self.excesses, value - self.t)
 
-                    gamma, sigma = _grimshaw(self.excesses)
+                    gamma, sigma = self._grimshaw.solve(self.excesses)
                     self.zq = _calculate_threshold(
                         q=self.q,
                         gamma=gamma,
@@ -111,6 +113,7 @@ class DSPOT:
         self.excesses = np.zeros(1, dtype=float)
         self.window = np.zeros(1, dtype=float)
         self.window_avg = 0
+        self._grimshaw = None
 
     def fit(self, X: np.ndarray, init_quantile: float = 0.98):
         depth = self.depth
@@ -128,7 +131,8 @@ class DSPOT:
             window_avg += (X[i] - X[i - depth]) / depth
 
         # Calculate the zq and t.
-        zq, t = pot(diff, self.q, init_quantile=init_quantile)
+        self._grimshaw = _Grimshaw()
+        zq, t = pot(diff, self.q, init_quantile=init_quantile, _grimshaw=self._grimshaw)
         self.t = t
         self.zq = zq
         self.calibrated = True
@@ -184,7 +188,7 @@ class DSPOT:
                 if value > self.t:
                     self.excesses = np.append(self.excesses, value - self.t)
 
-                    gamma, sigma = _grimshaw(self.excesses)
+                    gamma, sigma = self._grimshaw.solve(self.excesses)
                     self.zq = _calculate_threshold(
                         q=self.q,
                         gamma=gamma,
@@ -207,6 +211,7 @@ def pot(
     q: float = 1e-3,
     *,
     init_quantile: float = 0.98,
+    _grimshaw: _Grimshaw | None = None,
 ) -> tuple[float, float]:
     """
     Estimate the threshold zq such that P(X > zq) < q,
@@ -228,7 +233,10 @@ def pot(
     if excesses.size == 0:
         raise ValueError("Cannot estimate the threshold zq.")
 
-    gamma, sigma = _grimshaw(excesses)
+    if _grimshaw is None:
+        _grimshaw = _Grimshaw()
+
+    gamma, sigma = _grimshaw.solve(excesses)
 
     zq = _calculate_threshold(
         q=q, gamma=gamma, sigma=sigma, n=X.size, Nt=excesses.size, t=t
@@ -237,14 +245,77 @@ def pot(
     return zq, t
 
 
-def _grimshaw(
-    excesses: np.ndarray,
-    *,
-    num_candidates: int = 10,
-    epsilon: float = 1e-8,
-) -> tuple[float, float]:
-    def _solve_grimshaw(lower_bound: float, upper_bound: float) -> np.ndarray:
+class _Grimshaw:
+    def __init__(self, num_candidates: int = 10, epsilon: float = 1e-8) -> None:
+        self.num_candidates = num_candidates
+        self.epsilon = epsilon
+
+        self.candidates_1 = None
+        self.candidates_2 = None
+
+    def solve(self, excesses: np.ndarray) -> tuple[float, float]:
+        ymin, ymax, ymean = (
+            excesses.min(),
+            excesses.max(),
+            excesses.mean(),
+        )
+
+        # Calculate the bounds for root search.
+        a = -1 / ymax
+        b = 2 * (ymean - ymin) / (ymean * ymin)
+        c = 2 * (ymean - ymin) / (ymin * ymin)
+
+        # Instead of using root search, we perform a minimization problem.
+        epsilon = self.epsilon
+        candidates_1 = self._find_roots(
+            excesses=excesses,
+            lower_bound=a + epsilon,
+            upper_bound=-epsilon,
+            prev_candidates=self.candidates_1,
+        )
+        candidates_2 = self._find_roots(
+            excesses=excesses,
+            lower_bound=b,
+            upper_bound=c,
+            prev_candidates=self.candidates_2,
+        )
+        candidates = np.unique(np.concatenate([candidates_1, candidates_2]))
+
+        # Calculate gamma and sigma.
+        gamma = _v(excesses, candidates) - 1
+        sigma = gamma / candidates
+
+        # Include gamma and sigma for candidate = 0.
+        gamma = np.append(gamma, 0.0)
+        sigma = np.append(sigma, ymean)  # TODO: why ymean?
+
+        # Calculate the log-likelihood and choose the best one.
+        best_idx = np.nanargmax(_log_likelihood(excesses, gamma, sigma))
+
+        # Store the candidates for later.
+        self.candidates_1 = candidates_1
+        self.candidates_2 = candidates_2
+
+        return gamma[best_idx], sigma[best_idx]
+
+    def _find_roots(
+        self,
+        *,
+        excesses: np.ndarray,
+        lower_bound: float,
+        upper_bound: float,
+        prev_candidates: np.ndarray | None,
+    ) -> np.ndarray:
+        num_candidates = self.num_candidates
+
         x0 = np.linspace(lower_bound, upper_bound, num_candidates, endpoint=True)
+        if prev_candidates is not None:
+            x0 = np.where(
+                (lower_bound <= prev_candidates) & (prev_candidates <= upper_bound),
+                prev_candidates,
+                x0,
+            )
+
         results = minimize(
             _obj2,
             x0,
@@ -255,35 +326,6 @@ def _grimshaw(
         )
 
         return results.x
-
-    ymin, ymax, ymean = (
-        excesses.min(),
-        excesses.max(),
-        excesses.mean(),
-    )
-
-    # Calculate the bounds for root search.
-    a = -1 / ymax
-    b = 2 * (ymean - ymin) / (ymean * ymin)
-    c = 2 * (ymean - ymin) / (ymin * ymin)
-
-    # Instead of using root search, we perform a minimization problem.
-    candidates_1 = _solve_grimshaw(a + epsilon, -epsilon)
-    candidates_2 = _solve_grimshaw(b, c)
-    candidates = np.unique(np.concatenate([candidates_1, candidates_2]))
-
-    # Calculate gamma and sigma.
-    gamma = _v(excesses, candidates) - 1
-    sigma = gamma / candidates
-
-    # Include gamma and sigma for candidate = 0.
-    gamma = np.append(gamma, 0.0)
-    sigma = np.append(sigma, ymean)  # TODO: why ymean?
-
-    # Calculate the log-likelihood and choose the best one.
-    best_idx = np.nanargmax(_log_likelihood(excesses, gamma, sigma))
-
-    return gamma[best_idx], sigma[best_idx]
 
 
 @nb.njit([nb.bool(nb.float32), nb.bool(nb.float64)])
@@ -315,23 +357,6 @@ def _log_likelihood(excesses: np.ndarray, gamma: float, sigma: float, res: np.nd
 def _v(excesses: np.ndarray, x: np.ndarray):
     one_plus_prod = 1.0 + x[..., None] * excesses[None, ...]
     return 1.0 + np.nanmean(np.log(one_plus_prod), axis=-1)
-
-
-def _obj(x: np.ndarray, excesses: np.ndarray):
-    one_plus_prod = 1.0 + x[..., None] * excesses[None, ...]
-
-    # Calculate the objective.
-    u = np.mean(1.0 / one_plus_prod, axis=-1)
-    v = 1.0 + np.mean(np.log(one_plus_prod), axis=-1)
-    w = u * v - 1
-    obj = np.sum(w**2)
-
-    # Calculate the objective derivative wrt to each x.
-    u_deriv = -np.mean(excesses[None, ...] / one_plus_prod**2, axis=-1)
-    v_deriv = np.mean(excesses[None, ...] / one_plus_prod, axis=-1)
-    obj_deriv = 2 * w * (u_deriv * v + u * v_deriv)
-
-    return obj, obj_deriv
 
 
 @nb.njit(nogil=True)
