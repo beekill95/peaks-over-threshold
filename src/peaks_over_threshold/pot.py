@@ -169,8 +169,9 @@ class DSPOT:
         window_avg = self.window_avg
         window = self.window
 
-        for i in range(start_predict_idx, X.size):
+        for i in tqdm(range(start_predict_idx, X.size)):
             value = X[i] - window_avg
+            thresholds[i] = self.zq + window_avg
 
             # Found an extreme value.
             if value > self.zq:
@@ -178,7 +179,6 @@ class DSPOT:
             else:
                 # Update the window.
                 self.n += 1
-                thresholds[i] = self.zq + window_avg
 
                 # Reestimate EVD's parameters and update the zq.
                 if value > self.t:
