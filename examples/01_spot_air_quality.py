@@ -47,8 +47,17 @@ thresholds, alerts = spot.fit_predict(X["PT08.S3(NOx)"].to_numpy(), num_inits=10
 # %%
 fig, ax = plt.subplots(figsize=(12, 4))
 sns.lineplot(X, x=X.index, y="PT08.S3(NOx)")
-ax.plot(X.index, thresholds)
-ax.scatter(X.index[alerts], X["PT08.S3(NOx)"].loc[alerts], color="tomato", alpha=0.5)
+ax.plot(X.index, thresholds, label="Threshold")
+ax.scatter(
+    X.index[alerts],
+    X["PT08.S3(NOx)"].loc[alerts],
+    color="tomato",
+    alpha=0.5,
+    label="Alerts",
+)
+ax.legend()
+ax.set_title("SPOT")
+fig.tight_layout()
 
 # %%
 spot = DSPOT(100, 1e-4)
@@ -57,5 +66,14 @@ thresholds, alerts = spot.fit_predict(X["PT08.S3(NOx)"].to_numpy(), num_inits=10
 # %%
 fig, ax = plt.subplots(figsize=(12, 4))
 sns.lineplot(X, x=X.index, y="PT08.S3(NOx)")
-ax.plot(X.index, thresholds)
-ax.scatter(X.index[alerts], X["PT08.S3(NOx)"].loc[alerts], color="tomato", alpha=0.5)
+ax.plot(X.index, thresholds, label="Threshold")
+ax.scatter(
+    X.index[alerts],
+    X["PT08.S3(NOx)"].loc[alerts],
+    color="tomato",
+    alpha=0.5,
+    label="Alerts",
+)
+ax.legend()
+ax.set_title("DSPOT")
+fig.tight_layout()
