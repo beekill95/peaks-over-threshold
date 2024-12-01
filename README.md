@@ -12,7 +12,15 @@ The implementation follows the paper: _Siffer, Alban, et al.
 Proceedings of the 23rd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining.
 2017._
 
-__Example Results__
+> [!NOTE]
+> Unlike the original paper's implementation,
+> this implementation reuses `L-BFGS-B` minimization results to speed-up the Grimshaw procedure.
+
+> [!NOTE]
+> If you encounter runtime warnings saying invalid values, it might be because of number underflow.
+> Try casting input data to double-precision numbers.
+
+__Sample Results__
 
 _Please check the `examples` folder for more results._
 
