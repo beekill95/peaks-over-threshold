@@ -19,6 +19,9 @@ Proceedings of the 23rd ACM SIGKDD International Conference on Knowledge Discove
 > [!NOTE]
 > If you encounter runtime warnings saying invalid values, it might be because of number underflow.
 > Try casting input data to double-precision numbers.
+> Additionally, if the time series values are too large,
+> it might cause some issues with the upper and lower bounds of the Grimshaw procedure;
+> in that case, try rescaling the time series to some smaller values depending on the domains.
 
 __Sample Results__
 
